@@ -55,9 +55,12 @@ import { LoginPage } from './components/auth/LoginPage.tsx';
 import { ProductionCostSheetModal } from './components/manufacturing/ProductionCostSheetModal.tsx';
 import { canViewManufacturingCostSheet } from './types/pagePermissions.ts';
 import {
+  getDefaultLandingModule,
   getFirstAccessibleModule,
+  isBasicDataModule,
   isUserPermittedForModule,
   resolvePostLoginModule,
+  WORKSPACE_WELCOME_MODULE,
 } from './lib/postLoginRedirect.ts';
 import {
   parsePayrollTabFromRoute,
@@ -260,20 +263,24 @@ function MainApp() {
 
   const canAccessDashboard = isUserPermittedForModule(currentUser, 'dashboard');
   const firstAccessibleModule = hasValidActiveSession ? getFirstAccessibleModule(currentUser) : null;
+  const defaultLandingModule = hasValidActiveSession ? getDefaultLandingModule(currentUser) : null;
+  const safeLandingModule =
+    defaultLandingModule || (firstAccessibleModule ? WORKSPACE_WELCOME_MODULE : 'dashboard');
 
   // On initial load at root '/' or '/login' with an active session, ensure landing module respects permissions
+  // and opens the user's highest-priority accessible Dashboard (never Basic Data by default).
   useEffect(() => {
     if (typeof window === 'undefined' || !hasValidActiveSession) return;
     const currentPath = window.location.pathname;
     if (currentPath === '/' || currentPath === '' || currentPath === '/login') {
-      const targetModule = canAccessDashboard ? 'dashboard' : firstAccessibleModule || 'dashboard';
+      const targetModule = safeLandingModule;
       if (activeModule !== targetModule) {
         setActiveModule(targetModule);
       }
       const canonical = moduleToPathname(targetModule);
       window.history.replaceState({ module: targetModule }, '', canonical);
     }
-  }, [hasValidActiveSession, canAccessDashboard, firstAccessibleModule, activeModule]);
+  }, [hasValidActiveSession, safeLandingModule, activeModule]);
 
   // If session was invalidated/blocked while open, ensure clean logout state
   useEffect(() => {
@@ -282,11 +289,14 @@ function MainApp() {
     }
   }, [isAuthenticated, hasValidActiveSession, logout]);
 
-  // If not authenticated, render Login Page and preserve intended destination
+  // If not authenticated, render Login Page and preserve non-Basic-Data intended destination
   if (!hasValidActiveSession) {
     if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/') {
       try {
-        sessionStorage.setItem('ensec_intended_route', window.location.pathname);
+        const candidateMod = pathnameToModule(window.location.pathname);
+        if (!isBasicDataModule(candidateMod)) {
+          sessionStorage.setItem('ensec_intended_route', window.location.pathname);
+        }
       } catch {}
     }
     return (
@@ -395,16 +405,29 @@ function MainApp() {
               </p>
               <div className="pt-2 flex items-center justify-center gap-2">
                 <button
-                  onClick={() => navigateTo(firstAccessibleModule || 'dashboard')}
+                  onClick={() => navigateTo(safeLandingModule)}
                   className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>{canAccessDashboard ? 'Return to Dashboard' : 'Go to Authorized Page'}</span>
+                  <span>{defaultLandingModule ? 'Return to Dashboard' : 'Go to Authorized Workspace'}</span>
                 </button>
               </div>
             </div>
           ) : (
             <>
+              {activeModule === WORKSPACE_WELCOME_MODULE && (
+                <div className="p-8 max-w-md mx-auto mt-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm text-center space-y-3">
+                  <div className="flex justify-center">
+                    <BrandLogoMark branding={systemBranding} size="md" />
+                  </div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                    Welcome, {currentUser.name}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Select any of your authorized modules from the sidebar menu to get started.
+                  </p>
+                </div>
+              )}
               {activeModule === 'dashboard' && (
                 <ExecutiveDashboard onNavigate={(mod) => navigateTo(mod)} />
               )}
@@ -542,7 +565,7 @@ function MainApp() {
               {activeModule === 'field-tracker' && <FieldForceTrackerModule />}
               {activeModule === 'mobile-field' && (
                 <MobileSalesPortal
-                  onBackToERP={() => navigateTo(firstAccessibleModule || 'dashboard')}
+                  onBackToERP={() => navigateTo(safeLandingModule)}
                   onOpenERPMenu={() => setSidebarOpen(true)}
                 />
               )}

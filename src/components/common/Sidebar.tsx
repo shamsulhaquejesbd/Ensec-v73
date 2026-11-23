@@ -81,6 +81,7 @@ import { NotificationCenterDrawer } from './NotificationCenterDrawer.tsx';
 import { BrandLogoMark } from './BrandLogoMark.tsx';
 import { DEFAULT_SOFTWARE_NAME } from '../../types/systemSettings.ts';
 import { canViewCollectionNotification } from '../../types/pagePermissions.ts';
+import { getDefaultLandingModule, WORKSPACE_WELCOME_MODULE } from '../../lib/postLoginRedirect.ts';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -469,7 +470,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-between h-14 pl-3.5 pr-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
           <div
             onClick={() => {
-              onSelectModule('dashboard');
+              onSelectModule(getDefaultLandingModule(currentUser) || WORKSPACE_WELCOME_MODULE);
               onClose();
             }}
             className="flex items-center gap-2 cursor-pointer select-none min-w-0"

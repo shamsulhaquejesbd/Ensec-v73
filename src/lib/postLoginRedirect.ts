@@ -15,39 +15,38 @@ import {
   payrollModuleIdToTab,
 } from './payrollPermissions.ts';
 
+export const WORKSPACE_WELCOME_MODULE = 'welcome';
+
+/**
+ * Primary module Dashboards in exact configured Sidebar.tsx menu priority order.
+ * After login, the user is redirected to the first Dashboard they are authorized to access.
+ */
+export const DASHBOARD_PRIORITY_MODULES: readonly string[] = [
+  'dashboard',                     // CORE PLATFORM -> Executive Dashboard
+  'finance-accounting-dashboard',  // ACCOUNTS & FINANCE -> Accounting Dashboard
+  'installment-dashboard',         // ACCOUNTS & FINANCE -> Installment Dashboard
+  'collection-dashboard',          // ACCOUNTS & FINANCE -> Collection Dashboard
+  'sms-dashboard',                 // ACCOUNTS & FINANCE -> SMS Dashboard
+  'payroll-dashboard',             // ACCOUNTS & FINANCE -> Payroll & HR Dashboard
+  'overtime-dashboard',            // ACCOUNTS & FINANCE -> Overtime Management Dashboard
+  'warranty-dashboard',            // WARRANTY & SERVICE -> Warranty Dashboard
+];
+
 /**
  * Exact top-to-bottom navigation order matching Sidebar.tsx navSections.
- * Used to determine the first authorized landing page when a user lacks Dashboard permission.
  */
 export const SIDEBAR_ORDERED_MODULES: readonly string[] = [
+  // CORE PLATFORM
   'dashboard',
 
-  // Basic Data children
-  'basic-data-raw-materials',
-  'basic-data-raw-categories',
-  'basic-data-raw-classifications',
-  'basic-data-products',
-  'basic-data-categories',
-  'basic-data-brands',
-  'basic-data-warehouses',
-  'basic-data-distributors',
-  'basic-data-customers',
-  'basic-data-pricing-matrix',
-  'basic-data-org-hierarchy',
-  'basic-data-field-force',
-  'basic-data-departments',
-  'basic-data-banks',
-  'basic-data-uom',
-  'basic-data-offers',
-
-  // Supply Chain & Factory
+  // SUPPLY CHAIN & FACTORY
   'raw-material-receive',
   'raw-material-inventory',
   'procurement',
   'manufacturing',
   'manufacturing-costing',
 
-  // Stock & Warehouse
+  // STOCK
   'stock-cid-receive',
   'stock-create-opening',
   'stock-upload-opening',
@@ -61,7 +60,7 @@ export const SIDEBAR_ORDERED_MODULES: readonly string[] = [
   'inventory-stock',
   'warehouse',
 
-  // Field Force & Sales
+  // FIELD FORCE & SALES
   'field-tracker',
   'mobile-field',
   'sales-orders',
@@ -69,7 +68,7 @@ export const SIDEBAR_ORDERED_MODULES: readonly string[] = [
   'crm-agreements',
   'tada',
 
-  // Accounts & Finance
+  // ACCOUNTS & FINANCE
   'finance-accounting-dashboard',
   'finance-coa',
   'finance-opening-balances',
@@ -128,6 +127,7 @@ export const SIDEBAR_ORDERED_MODULES: readonly string[] = [
   'report-sms-delivery',
 
   // Payroll & HR / Overtime / Reports
+  'payroll-dashboard',
   'payroll',
   'overtime-dashboard',
   'overtime-requests',
@@ -140,7 +140,7 @@ export const SIDEBAR_ORDERED_MODULES: readonly string[] = [
   'overtime-management',
   'reports',
 
-  // Warranty & Service + User Management
+  // BASIC DATA | USER & WARRANTY
   'warranty-dashboard',
   'warranty-complaints',
   'warranty-jobcards',
@@ -158,9 +158,56 @@ export const SIDEBAR_ORDERED_MODULES: readonly string[] = [
   'warranty-reports',
   'warranty-settings',
   'warranty',
+
+  // Basic Data (only accessible via manual sidebar click; never default landing page)
+  'basic-data-raw-materials',
+  'basic-data-raw-categories',
+  'basic-data-raw-classifications',
+  'basic-data-products',
+  'basic-data-categories',
+  'basic-data-brands',
+  'basic-data-warehouses',
+  'basic-data-distributors',
+  'basic-data-customers',
+  'basic-data-pricing-matrix',
+  'basic-data-org-hierarchy',
+  'basic-data-field-force',
+  'basic-data-departments',
+  'basic-data-banks',
+  'basic-data-uom',
+  'basic-data-offers',
+
   'users-permissions',
   'settings',
 ];
+
+const BASIC_DATA_ALIAS_MODULES = new Set([
+  'basic-data',
+  'raw-materials',
+  'distributors',
+  'org-hierarchy',
+  'uom',
+  'offers',
+  'categories',
+  'brands',
+  'products',
+  'warehouses',
+  'customers',
+  'departments',
+  'banks',
+  'pricing-matrix',
+  'field-force',
+]);
+
+/**
+ * Returns true if the module belongs to Basic Data (e.g. Basic Data -> Employee).
+ * Basic Data pages must NEVER be opened automatically as the post-login landing page.
+ */
+export function isBasicDataModule(moduleId?: string | null): boolean {
+  if (!moduleId) return false;
+  const normalized = moduleId.trim().toLowerCase();
+  return normalized.startsWith('basic-data-') || BASIC_DATA_ALIAS_MODULES.has(normalized);
+}
 
 /**
  * Evaluates whether the user has existing ERP clearance to view a given module/route.
@@ -172,6 +219,7 @@ export function isUserPermittedForModule(
 ): boolean {
   if (!user || !user.id || user.id === 'guest') return false;
   if (user.status === 'Blocked' || user.status === 'Inactive') return false;
+  if (moduleId === WORKSPACE_WELCOME_MODULE) return true;
   if (user.role === 'Super Admin') return true;
 
   if (moduleId === 'manufacturing-cost-sheet') {
@@ -236,28 +284,63 @@ export function getFirstAccessibleModule(
 }
 
 /**
+ * Resolves the default post-login landing page based on assigned permissions:
+ * 1. First accessible Dashboard following configured sidebar menu priority
+ *    (Executive -> Accounting -> Installment -> Collection -> SMS -> Payroll & HR -> Overtime -> Warranty).
+ * 2. Otherwise, first accessible non-Basic-Data primary operational module in sidebar menu order.
+ * 3. NEVER returns any Basic Data page (e.g. Basic Data -> Employee).
+ */
+export function getDefaultLandingModule(
+  user: Partial<User> | null | undefined
+): string | null {
+  if (!user || !user.id || user.id === 'guest') return null;
+  if (user.status === 'Blocked' || user.status === 'Inactive') return null;
+
+  for (const dashboardMod of DASHBOARD_PRIORITY_MODULES) {
+    if (isUserPermittedForModule(user, dashboardMod)) {
+      return dashboardMod;
+    }
+  }
+
+  for (const mod of SIDEBAR_ORDERED_MODULES) {
+    if (isBasicDataModule(mod)) continue;
+    if (isUserPermittedForModule(user, mod)) {
+      return mod;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Resolves the post-login landing module:
- * 1. Honors an explicit deep-link module if the user actually has permission for it.
- * 2. Uses 'dashboard' if the user has Dashboard permission.
- * 3. Otherwise falls back to the first accessible sidebar module (or null if none).
+ * 1. Honors an explicit non-Basic-Data deep-link module if the user has permission for it.
+ * 2. Otherwise opens the highest-priority accessible Dashboard (or non-Basic-Data primary module).
+ * 3. If the user only has Basic Data access, lands on the workspace welcome screen so
+ *    Basic Data (including Employee) is NEVER opened automatically after login.
  */
 export function resolvePostLoginModule(
   user: Partial<User> | null | undefined,
   intendedModule?: string | null
 ): string | null {
   if (!user || !user.id || user.id === 'guest') return null;
+  if (user.status === 'Blocked' || user.status === 'Inactive') return null;
 
   if (
     intendedModule &&
     intendedModule !== 'dashboard' &&
+    intendedModule !== WORKSPACE_WELCOME_MODULE &&
+    !isBasicDataModule(intendedModule) &&
     isUserPermittedForModule(user, intendedModule)
   ) {
     return intendedModule;
   }
 
-  if (isUserPermittedForModule(user, 'dashboard')) {
-    return 'dashboard';
+  const defaultLanding = getDefaultLandingModule(user);
+  if (defaultLanding) {
+    return defaultLanding;
   }
 
-  return getFirstAccessibleModule(user);
+  // User has Basic Data permission(s) only: never auto-open Basic Data after login
+  return getFirstAccessibleModule(user) ? WORKSPACE_WELCOME_MODULE : null;
 }
