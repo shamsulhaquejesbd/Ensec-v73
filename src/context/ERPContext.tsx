@@ -942,7 +942,7 @@ interface ERPContextType {
   overtimeAttendances: OvertimeAttendance[];
   overtimePolicies: OvertimePolicyConfig[];
   overtimeAuditLogs: OvertimeAuditTrail[];
-  refreshOvertimeRequisitions: () => Promise<void>;
+  refreshOvertimeRequisitions: () => Promise<{ success: boolean; error?: string }>;
   createOvertimeRequisition: (payload: {
     overtimeDate: string;
     requiredWorkers: number;
@@ -7320,7 +7320,7 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setOvertimeRequisitions([]);
       setGrantedOvertimeRequisitions([]);
     }
-  }, [isAuthenticated, currentUser?.id]);
+  }, [isAuthenticated, currentUser?.id, erpSessionToken]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
@@ -24239,28 +24239,75 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('OVERTIME_REQUEST_DELETED', 'Overtime Hub', `Deleted OT request ${target.requestNumber}`);
   };
 
-  const refreshOvertimeRequisitions = async () => {
-    if (!currentUser?.id || currentUser.id === 'guest') return;
+  const deduplicateOvertimeRequisitions = (rows: OvertimeRequisition[]): OvertimeRequisition[] => {
+    const byId = new Map<string, OvertimeRequisition>();
+    for (const r of rows) {
+      if (r && r.id) {
+        byId.set(String(r.id), r);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) =>
+      String(b.submittedAt || b.createdAt).localeCompare(String(a.submittedAt || a.createdAt))
+    );
+  };
+
+  const fetchOvertimeRequisitionApi = async (
+    url: string,
+    init?: Omit<RequestInit, 'headers'>
+  ): Promise<Response> => {
+    const initialResp = await fetch(url, {
+      ...init,
+      headers: getErpAuthHeaders(),
+    });
+    if (initialResp.status === 401 && currentUser?.id && currentUser.id !== 'guest') {
+      const freshToken = await establishServerSession(currentUser);
+      if (freshToken) {
+        return fetch(url, {
+          ...init,
+          headers: getErpAuthHeaders(freshToken),
+        });
+      }
+    }
+    return initialResp;
+  };
+
+  const refreshOvertimeRequisitions = async (): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser?.id || currentUser.id === 'guest') {
+      return { success: false, error: 'User authentication is required to load overtime requisitions.' };
+    }
     try {
-      const headers = getErpAuthHeaders();
       const [mainResp, grantedResp] = await Promise.all([
-        fetch('/api/overtime/requisitions', { headers }),
-        fetch('/api/overtime/requisitions?grantedOnly=1', { headers }),
+        fetchOvertimeRequisitionApi('/api/overtime/requisitions'),
+        fetchOvertimeRequisitionApi('/api/overtime/requisitions?grantedOnly=1'),
       ]);
+
+      let mainError: string | undefined;
+
       if (mainResp.ok) {
-        const data = await mainResp.json();
+        const data = await mainResp.json().catch(() => ({}));
         if (Array.isArray(data?.requisitions)) {
-          setOvertimeRequisitions(data.requisitions);
+          setOvertimeRequisitions(deduplicateOvertimeRequisitions(data.requisitions));
         }
+      } else if (mainResp.status !== 403) {
+        const errData = await mainResp.json().catch(() => ({}));
+        mainError = errData?.error || `Failed to load overtime requisitions (HTTP ${mainResp.status}).`;
       }
+
       if (grantedResp.ok) {
-        const gData = await grantedResp.json();
+        const gData = await grantedResp.json().catch(() => ({}));
         if (Array.isArray(gData?.requisitions)) {
-          setGrantedOvertimeRequisitions(gData.requisitions);
+          setGrantedOvertimeRequisitions(deduplicateOvertimeRequisitions(gData.requisitions));
         }
       }
-    } catch (err) {
+
+      if (mainError) {
+        return { success: false, error: mainError };
+      }
+      return { success: true };
+    } catch (err: any) {
+      const msg = err?.message || 'Network error while fetching overtime requisitions from Supabase.';
       console.warn('Unable to refresh overtime requisitions:', err);
+      return { success: false, error: msg };
     }
   };
 
@@ -24272,20 +24319,25 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     remarks?: string;
   }) => {
     try {
-      const resp = await fetch('/api/overtime/requisitions', {
+      const resp = await fetchOvertimeRequisitionApi('/api/overtime/requisitions', {
         method: 'POST',
-        headers: getErpAuthHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data?.requisition) {
+      if (!resp.ok || data?.success !== true || data?.dbSynced !== true || !data?.requisition) {
         return {
           success: false,
-          error: data?.error || 'Failed to submit overtime requisition.',
+          dbSynced: false,
+          error:
+            data?.error ||
+            data?.dbError ||
+            'Failed to save overtime requisition in Supabase. Please try again.',
         };
       }
       const created: OvertimeRequisition = data.requisition;
-      setOvertimeRequisitions((prev) => [created, ...prev.filter((r) => r.id !== created.id)]);
+      setOvertimeRequisitions((prev) =>
+        deduplicateOvertimeRequisitions([created, ...prev.filter((r) => r.id !== created.id)])
+      );
       addOvertimeAuditLog({
         recordId: created.id,
         recordType: 'REQUEST',
@@ -24296,14 +24348,16 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         newState: created.status,
       });
       addAuditLog('OVERTIME_REQUISITION_SUBMITTED', 'Overtime Requisition', `Submitted ${created.requisitionNumber}`);
+      await refreshOvertimeRequisitions();
       return {
         success: true,
         requisition: created,
-        dbSynced: Boolean(data.dbSynced),
+        dbSynced: true,
       };
     } catch (err: any) {
       return {
         success: false,
+        dbSynced: false,
         error: err?.message || 'Network error while submitting overtime requisition.',
       };
     }
@@ -24320,21 +24374,24 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   ) => {
     try {
-      const resp = await fetch(`/api/overtime/requisitions/${encodeURIComponent(id)}`, {
+      const resp = await fetchOvertimeRequisitionApi(`/api/overtime/requisitions/${encodeURIComponent(id)}`, {
         method: 'PUT',
-        headers: getErpAuthHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data?.requisition) {
+      if (!resp.ok || data?.success !== true || data?.dbSynced !== true || !data?.requisition) {
         return {
           success: false,
-          error: data?.error || 'Failed to update & resubmit overtime requisition.',
+          dbSynced: false,
+          error:
+            data?.error ||
+            data?.dbError ||
+            'Failed to save updated overtime requisition in Supabase. Please try again.',
         };
       }
       const updated: OvertimeRequisition = data.requisition;
       setOvertimeRequisitions((prev) =>
-        prev.map((r) => (r.id === updated.id ? updated : r))
+        deduplicateOvertimeRequisitions(prev.map((r) => (r.id === updated.id ? updated : r)))
       );
       addOvertimeAuditLog({
         recordId: updated.id,
@@ -24347,14 +24404,16 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         newState: updated.status,
       });
       addAuditLog('OVERTIME_REQUISITION_RESUBMITTED', 'Overtime Requisition', `Resubmitted ${updated.requisitionNumber}`);
+      await refreshOvertimeRequisitions();
       return {
         success: true,
         requisition: updated,
-        dbSynced: Boolean(data.dbSynced),
+        dbSynced: true,
       };
     } catch (err: any) {
       return {
         success: false,
+        dbSynced: false,
         error: err?.message || 'Network error while updating overtime requisition.',
       };
     }
@@ -24366,27 +24425,32 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     remarks?: string
   ) => {
     try {
-      const resp = await fetch(`/api/overtime/requisitions/${encodeURIComponent(id)}/decision`, {
-        method: 'POST',
-        headers: getErpAuthHeaders(),
-        body: JSON.stringify({ decision, remarks }),
-      });
+      const resp = await fetchOvertimeRequisitionApi(
+        `/api/overtime/requisitions/${encodeURIComponent(id)}/decision`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ decision, remarks }),
+        }
+      );
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data?.requisition) {
+      if (!resp.ok || data?.success !== true || data?.dbSynced !== true || !data?.requisition) {
         return {
           success: false,
-          error: data?.error || 'Failed to process Head Office decision.',
+          dbSynced: false,
+          error:
+            data?.error ||
+            data?.dbError ||
+            'Failed to save Head Office decision in Supabase. Please try again.',
         };
       }
       const updated: OvertimeRequisition = data.requisition;
       setOvertimeRequisitions((prev) =>
-        prev.map((r) => (r.id === updated.id ? updated : r))
+        deduplicateOvertimeRequisitions(prev.map((r) => (r.id === updated.id ? updated : r)))
       );
       if (updated.status === 'Approved' && updated.overtimeGranted) {
-        setGrantedOvertimeRequisitions((prev) => [
-          updated,
-          ...prev.filter((r) => r.id !== updated.id),
-        ]);
+        setGrantedOvertimeRequisitions((prev) =>
+          deduplicateOvertimeRequisitions([updated, ...prev.filter((r) => r.id !== updated.id)])
+        );
       }
       addOvertimeAuditLog({
         recordId: updated.id,
@@ -24399,14 +24463,16 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         newState: updated.status,
       });
       addAuditLog('OVERTIME_REQUISITION_DECISION', 'Overtime Requisition', `${decision} ${updated.requisitionNumber}`);
+      await refreshOvertimeRequisitions();
       return {
         success: true,
         requisition: updated,
-        dbSynced: Boolean(data.dbSynced),
+        dbSynced: true,
       };
     } catch (err: any) {
       return {
         success: false,
+        dbSynced: false,
         error: err?.message || 'Network error while processing Head Office decision.',
       };
     }

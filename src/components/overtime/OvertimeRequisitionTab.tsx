@@ -7,7 +7,7 @@
  * Approval authorizes overtime capacity only and does NOT auto-create attendance or payroll entries.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useERP } from '../../context/ERPContext.tsx';
 import {
   OvertimeRequisition,
@@ -135,6 +135,31 @@ export const OvertimeRequisitionTab: React.FC = () => {
   const [requestedByFilter, setRequestedByFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Automatically fetch saved requisitions from Supabase whenever this page mounts or the active user changes
+  useEffect(() => {
+    if ((!canAccessRequisition && !canApproveRequisition) || !currentUser?.id || currentUser.id === 'guest') {
+      return;
+    }
+    let cancelled = false;
+    setIsRefreshing(true);
+    setLoadError(null);
+    void refreshOvertimeRequisitions()
+      .then((res) => {
+        if (!cancelled && res && !res.success && res.error) {
+          setLoadError(res.error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsRefreshing(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, canAccessRequisition, canApproveRequisition]);
 
   // Detail & Head Office Decision Modal State
   const [activeModalReqId, setActiveModalReqId] = useState<string | null>(null);
@@ -352,24 +377,25 @@ export const OvertimeRequisitionTab: React.FC = () => {
         ? await updateOvertimeRequisition(editingRequisition.id, payload)
         : await createOvertimeRequisition(payload);
 
-      if (!res.success || !res.requisition) {
+      if (!res.success || !res.dbSynced || !res.requisition) {
         setFormFeedback({
           type: 'error',
-          message: res.error || 'Could not submit overtime requisition.',
+          message:
+            res.error ||
+            'Could not save overtime requisition in Supabase. Please check your connection and try again.',
         });
         return;
       }
 
       const actionLabel = editingRequisition
-        ? `Resubmitted ${res.requisition.requisitionNumber} to Head Office for approval.`
-        : `Submitted ${res.requisition.requisitionNumber} for Head Office approval.`;
+        ? `Resubmitted ${res.requisition.requisitionNumber} to Head Office for approval and saved to Supabase.`
+        : `Submitted ${res.requisition.requisitionNumber} for Head Office approval and saved to Supabase.`;
 
       setFormFeedback({
-        type: res.dbSynced ? 'success' : 'warning',
-        message: res.dbSynced
-          ? actionLabel
-          : `${actionLabel} (Saved in server memory; run the Supabase Overtime Requisition SQL migration for persistent DB storage.)`,
+        type: 'success',
+        message: actionLabel,
       });
+      setLoadError(null);
       resetForm();
     } finally {
       setIsSubmittingForm(false);
@@ -395,10 +421,10 @@ export const OvertimeRequisitionTab: React.FC = () => {
     setIsSubmittingDecision(true);
     try {
       const res = await decideOvertimeRequisition(activeModalReq.id, decision, cleanRemarks);
-      if (!res.success || !res.requisition) {
+      if (!res.success || !res.dbSynced || !res.requisition) {
         setDecisionFeedback({
           type: 'error',
-          message: res.error || 'Failed to record Head Office decision.',
+          message: res.error || 'Failed to save Head Office decision to Supabase.',
         });
         return;
       }
@@ -419,8 +445,12 @@ export const OvertimeRequisitionTab: React.FC = () => {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
+    setLoadError(null);
     try {
-      await refreshOvertimeRequisitions();
+      const res = await refreshOvertimeRequisitions();
+      if (res && !res.success && res.error) {
+        setLoadError(res.error);
+      }
     } finally {
       setIsRefreshing(false);
     }
@@ -463,6 +493,23 @@ export const OvertimeRequisitionTab: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Load Error Alert (shown only if Supabase fetch fails) */}
+      {loadError && (
+        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="font-medium">{loadError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleRefresh()}
+            className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 hover:bg-rose-200 dark:hover:bg-rose-900 font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Summary KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
