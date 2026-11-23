@@ -110,7 +110,7 @@ export const OvertimeRequisitionTab: React.FC = () => {
 
   // Form State (Create or Edit/Resubmit Returned Requisition)
   const [editingRequisition, setEditingRequisition] = useState<OvertimeRequisition | null>(null);
-  const [isFormOpen, setIsFormOpen] = useState<boolean>(true);
+  const [isFormOpen, setIsFormOpen] = useState<boolean>(false);
   const [overtimeDate, setOvertimeDate] = useState<string>(() => getTodayIsoDate());
   const [requiredWorkers, setRequiredWorkers] = useState<string>('5');
   const [requestedHours, setRequestedHours] = useState<string>('2');
