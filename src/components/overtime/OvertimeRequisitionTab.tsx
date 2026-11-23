@@ -696,7 +696,7 @@ export const OvertimeRequisitionTab: React.FC = () => {
               <div>
                 <label className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                   <Tag className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Overtime Purpose (Multi-Select from Payroll Settings or Manual Entry) *</span>
+                  <span>Overtime Purpose (Multi-Select) *</span>
                 </label>
                 
               </div>
@@ -708,9 +708,7 @@ export const OvertimeRequisitionTab: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               {/* Multi-Select Dropdown from Payroll Settings */}
               <div className="relative space-y-1">
-                <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block">
-                  1. Select from Payroll Settings → Overtime Purpose
-                </span>
+                
                 <button
                   type="button"
                   onClick={() => setIsPurposeDropdownOpen((o) => !o)}
@@ -785,9 +783,7 @@ export const OvertimeRequisitionTab: React.FC = () => {
 
               {/* Manual Custom Purpose Entry */}
               <div className="space-y-1">
-                <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block">
-                  2. Or Write a Custom Purpose (Editable, Requisition-Only)
-                </span>
+                
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
