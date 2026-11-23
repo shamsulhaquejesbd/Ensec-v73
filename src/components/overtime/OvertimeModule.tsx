@@ -126,18 +126,7 @@ export const OvertimeModule: React.FC<OvertimeModuleProps> = ({ initialSubTab = 
               Quick Punch / Log
             </button>
           )}
-          {canCreateRequest && (
-            <button
-              onClick={() => {
-                setEditingRequest(null);
-                setIsNewRequestModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              New Overtime Request
-            </button>
-          )}
+          
         </div>
       </div>
 
