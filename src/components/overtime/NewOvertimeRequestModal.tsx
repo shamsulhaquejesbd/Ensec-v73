@@ -534,20 +534,7 @@ export const NewOvertimeRequestModal: React.FC<NewOvertimeRequestModalProps> = (
               />
             </div>
 
-            {duplicateForDate && (
-              <div className="sm:col-span-2 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-start gap-2 text-[11px]">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
-                <div>
-                  <div className="font-bold">
-                    Duplicate Overtime Request Blocked ({duplicateForDate.requestNumber})
-                  </div>
-                  <p className="mt-0.5 leading-relaxed">
-                    <strong>{selectedEmployee?.name}</strong> already has an overtime request on{' '}
-                    <strong>{overtimeDate}</strong> (Status: <strong>{duplicateForDate.status}</strong>). Only one overtime request is permitted per employee per attendance date.
-                  </p>
-                </div>
-              </div>
-            )}
+           
 
             <div className="space-y-1">
               <label className="font-bold text-slate-700 dark:text-slate-300">
