@@ -3575,11 +3575,15 @@ export function createAppServer() {
   };
 
   const insertSingleRequisitionIntoPrimaryTables = async (
-    reqRecord: OvertimeRequisition
+    reqRecord: OvertimeRequisition,
+    options?: { allowLegacyStatusBackfill?: boolean }
   ): Promise<{ ok: boolean; missingTable?: boolean; error?: string }> => {
     if (!serverSupabase) {
       return { ok: false, error: 'Supabase client is not configured on the server.' };
     }
+    const needsTwoStepBackfill =
+      Boolean(options?.allowLegacyStatusBackfill) && reqRecord.status !== 'Pending Approval';
+
     const { data: insertedRow, error: reqErr } = await serverSupabase
       .from('overtime_requisitions')
       .insert({
@@ -3598,15 +3602,15 @@ export function createAppServer() {
         requested_by_role: reqRecord.requestedByRole || null,
         requested_by_department: reqRecord.requestedByDepartment || null,
         submitted_at: reqRecord.submittedAt,
-        status: reqRecord.status,
-        overtime_granted: Boolean(reqRecord.overtimeGranted),
-        granted_at: reqRecord.grantedAt || null,
-        approved_by_id: reqRecord.approvedById || null,
-        approved_by_name: reqRecord.approvedByName || null,
-        approved_by: reqRecord.approvedBy || null,
-        approved_at: reqRecord.approvedAt || null,
-        approval_remarks: reqRecord.approvalRemarks || null,
-        returned_count: Number(reqRecord.returnedCount) || 0,
+        status: needsTwoStepBackfill ? 'Pending Approval' : reqRecord.status,
+        overtime_granted: needsTwoStepBackfill ? false : Boolean(reqRecord.overtimeGranted),
+        granted_at: needsTwoStepBackfill ? null : reqRecord.grantedAt || null,
+        approved_by_id: needsTwoStepBackfill ? null : reqRecord.approvedById || null,
+        approved_by_name: needsTwoStepBackfill ? null : reqRecord.approvedByName || null,
+        approved_by: needsTwoStepBackfill ? null : reqRecord.approvedBy || null,
+        approved_at: needsTwoStepBackfill ? null : reqRecord.approvedAt || null,
+        approval_remarks: needsTwoStepBackfill ? null : reqRecord.approvalRemarks || null,
+        returned_count: needsTwoStepBackfill ? 0 : Number(reqRecord.returnedCount) || 0,
         last_resubmitted_at: reqRecord.lastResubmittedAt || null,
         created_at: reqRecord.createdAt,
         updated_at: reqRecord.updatedAt || reqRecord.createdAt,
@@ -3629,6 +3633,27 @@ export function createAppServer() {
       };
     }
 
+    if (needsTwoStepBackfill) {
+      const { error: backfillStatusErr } = await serverSupabase
+        .from('overtime_requisitions')
+        .update({
+          status: reqRecord.status,
+          overtime_granted: Boolean(reqRecord.overtimeGranted),
+          granted_at: reqRecord.grantedAt || null,
+          approved_by_id: reqRecord.approvedById || reqRecord.requestedById || 'system',
+          approved_by_name: reqRecord.approvedByName || reqRecord.approvedBy || 'System',
+          approved_by: reqRecord.approvedBy || reqRecord.approvedByName || 'System',
+          approved_at: reqRecord.approvedAt || reqRecord.updatedAt || new Date().toISOString(),
+          approval_remarks: reqRecord.approvalRemarks || null,
+          returned_count: Number(reqRecord.returnedCount) || 0,
+          updated_at: reqRecord.updatedAt || new Date().toISOString(),
+        })
+        .eq('id', reqRecord.id);
+      if (backfillStatusErr) {
+        console.warn('[OvertimeRequisition] Warning backfilling final status:', backfillStatusErr.message);
+      }
+    }
+
     if (reqRecord.purposes.length > 0) {
       const { error: purposeErr } = await serverSupabase
         .from('overtime_requisition_purposes')
@@ -3644,11 +3669,15 @@ export function createAppServer() {
           { onConflict: 'id' }
         );
       if (purposeErr && !isMissingSupabaseTableError(purposeErr)) {
-        console.warn('[OvertimeRequisition] Warning inserting purposes:', purposeErr.message);
+        return {
+          ok: false,
+          error: `Failed to save overtime_requisition_purposes: ${purposeErr.message}`,
+        };
       }
     }
 
     if (reqRecord.approvalHistory.length > 0) {
+      // Use ignoreDuplicates: true (ON CONFLICT DO NOTHING) because anon has SELECT+INSERT only (no UPDATE) on immutable approval history
       const { error: histErr } = await serverSupabase
         .from('overtime_requisition_approval_history')
         .upsert(
@@ -3664,10 +3693,13 @@ export function createAppServer() {
             new_status: h.newStatus,
             action_at: h.actionAt,
           })),
-          { onConflict: 'id' }
+          { onConflict: 'id', ignoreDuplicates: true }
         );
       if (histErr && !isMissingSupabaseTableError(histErr)) {
-        console.warn('[OvertimeRequisition] Warning inserting approval history:', histErr.message);
+        return {
+          ok: false,
+          error: `Failed to save overtime_requisition_approval_history: ${histErr.message}`,
+        };
       }
     }
 
@@ -3795,13 +3827,28 @@ export function createAppServer() {
       }
 
       // If any records were previously saved in Supabase system_settings before migration,
-      // preserve them and backfill them transparently into public.overtime_requisitions
+      // preserve them and backfill them transparently into public.overtime_requisitions + child tables
       if (!settingsRes.error && settingsRes.records.length > 0) {
+        const backfillTasks: Promise<unknown>[] = [];
         for (const legacyRec of settingsRes.records) {
           if (!mergedMap.has(legacyRec.id)) {
             mergedMap.set(legacyRec.id, legacyRec);
-            void insertSingleRequisitionIntoPrimaryTables(legacyRec).catch(() => {});
+            backfillTasks.push(
+              insertSingleRequisitionIntoPrimaryTables(legacyRec, {
+                allowLegacyStatusBackfill: true,
+              }).then((res) => {
+                if (!res.ok && !res.missingTable) {
+                  console.warn(
+                    `[OvertimeRequisition] Legacy backfill warning for ${legacyRec.requisitionNumber}:`,
+                    res.error
+                  );
+                }
+              })
+            );
           }
+        }
+        if (backfillTasks.length > 0) {
+          await Promise.allSettled(backfillTasks);
         }
       }
     } else if (isMissingSupabaseTableError(reqErr)) {
@@ -4167,36 +4214,64 @@ export function createAppServer() {
             error: 'Supabase update did not modify any requisition row (check RLS policies or concurrent edits).',
           });
         } else {
-          await serverSupabase
+          const { error: delPurpErr } = await serverSupabase
             .from('overtime_requisition_purposes')
             .delete()
             .eq('requisition_id', id);
-
-          if (result.requisition.purposes.length > 0) {
-            await serverSupabase.from('overtime_requisition_purposes').insert(
-              result.requisition.purposes.map((p) => ({
-                id: p.id,
-                requisition_id: id,
-                payroll_purpose_id: p.payrollPurposeId || null,
-                purpose_name: p.purposeName,
-                is_custom: Boolean(p.isCustom),
-                created_at: p.createdAt || new Date().toISOString(),
-              }))
-            );
+          if (delPurpErr && !isMissingSupabaseTableError(delPurpErr)) {
+            return res.status(500).json({
+              allowed: true,
+              success: false,
+              dbSynced: false,
+              error: `Failed to refresh overtime_requisition_purposes: ${delPurpErr.message}`,
+            });
           }
 
-          await serverSupabase.from('overtime_requisition_approval_history').insert({
-            id: result.historyEntry.id,
-            requisition_id: id,
-            action: result.historyEntry.action,
-            actor_id: result.historyEntry.actorId || null,
-            actor_name: result.historyEntry.actorName,
-            actor_role: result.historyEntry.actorRole || null,
-            remarks: result.historyEntry.remarks || null,
-            previous_status: result.historyEntry.previousStatus || null,
-            new_status: result.historyEntry.newStatus,
-            action_at: result.historyEntry.actionAt,
-          });
+          if (result.requisition.purposes.length > 0) {
+            const { error: insPurpErr } = await serverSupabase
+              .from('overtime_requisition_purposes')
+              .insert(
+                result.requisition.purposes.map((p) => ({
+                  id: p.id,
+                  requisition_id: id,
+                  payroll_purpose_id: p.payrollPurposeId || null,
+                  purpose_name: p.purposeName,
+                  is_custom: Boolean(p.isCustom),
+                  created_at: p.createdAt || new Date().toISOString(),
+                }))
+              );
+            if (insPurpErr && !isMissingSupabaseTableError(insPurpErr)) {
+              return res.status(500).json({
+                allowed: true,
+                success: false,
+                dbSynced: false,
+                error: `Failed to insert overtime_requisition_purposes: ${insPurpErr.message}`,
+              });
+            }
+          }
+
+          const { error: insHistErr } = await serverSupabase
+            .from('overtime_requisition_approval_history')
+            .insert({
+              id: result.historyEntry.id,
+              requisition_id: id,
+              action: result.historyEntry.action,
+              actor_id: result.historyEntry.actorId || null,
+              actor_name: result.historyEntry.actorName,
+              actor_role: result.historyEntry.actorRole || null,
+              remarks: result.historyEntry.remarks || null,
+              previous_status: result.historyEntry.previousStatus || null,
+              new_status: result.historyEntry.newStatus,
+              action_at: result.historyEntry.actionAt,
+            });
+          if (insHistErr && !isMissingSupabaseTableError(insHistErr)) {
+            return res.status(500).json({
+              allowed: true,
+              success: false,
+              dbSynced: false,
+              error: `Failed to insert overtime_requisition_approval_history: ${insHistErr.message}`,
+            });
+          }
         }
       } else {
         const fallbackRes = await saveRequisitionsToSystemSettings(
@@ -4353,18 +4428,28 @@ export function createAppServer() {
             error: 'Decision could not be persisted because the requisition status changed or RLS blocked the update.',
           });
         } else {
-          await serverSupabase.from('overtime_requisition_approval_history').insert({
-            id: result.historyEntry.id,
-            requisition_id: id,
-            action: result.historyEntry.action,
-            actor_id: result.historyEntry.actorId || null,
-            actor_name: result.historyEntry.actorName,
-            actor_role: result.historyEntry.actorRole || null,
-            remarks: result.historyEntry.remarks || null,
-            previous_status: result.historyEntry.previousStatus || null,
-            new_status: result.historyEntry.newStatus,
-            action_at: result.historyEntry.actionAt,
-          });
+          const { error: histErr } = await serverSupabase
+            .from('overtime_requisition_approval_history')
+            .insert({
+              id: result.historyEntry.id,
+              requisition_id: id,
+              action: result.historyEntry.action,
+              actor_id: result.historyEntry.actorId || null,
+              actor_name: result.historyEntry.actorName,
+              actor_role: result.historyEntry.actorRole || null,
+              remarks: result.historyEntry.remarks || null,
+              previous_status: result.historyEntry.previousStatus || null,
+              new_status: result.historyEntry.newStatus,
+              action_at: result.historyEntry.actionAt,
+            });
+          if (histErr && !isMissingSupabaseTableError(histErr)) {
+            return res.status(500).json({
+              allowed: true,
+              success: false,
+              dbSynced: false,
+              error: `Failed to insert overtime_requisition_approval_history: ${histErr.message}`,
+            });
+          }
         }
       } else {
         const fallbackRes = await saveRequisitionsToSystemSettings(

@@ -300,3 +300,5 @@ GRANT ALL ON public.overtime_requisition_approval_history TO postgres, service_r
 REVOKE UPDATE, DELETE ON public.overtime_requisition_approval_history FROM anon;
 
 COMMIT;
+
+NOTIFY pgrst, 'reload schema';
