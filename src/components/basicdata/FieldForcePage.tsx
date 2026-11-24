@@ -285,6 +285,7 @@ export const FieldForcePage: React.FC = () => {
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [allDepartmentsChecked, setAllDepartmentsChecked] = useState(false);
   const [departmentError, setDepartmentError] = useState<string>('');
+  const [formValidationError, setFormValidationError] = useState<string>('');
 
   // Markets & Distributors
   const [allMarketsChecked, setAllMarketsChecked] = useState(false);
@@ -487,6 +488,7 @@ export const FieldForcePage: React.FC = () => {
     setFormTadaApproverId('');
     setFormLinkedUserId('');
     setDepartmentError('');
+    setFormValidationError('');
   };
 
   const handleOpenAdd = () => {
@@ -501,6 +503,7 @@ export const FieldForcePage: React.FC = () => {
     setEditingRep(rep);
     setEditModalTab('all');
     setDepartmentError('');
+    setFormValidationError('');
     setFormCode(rep.code || '');
     setFormPin(rep.pin || '1234');
     setFormName(rep.name || '');
@@ -660,10 +663,30 @@ export const FieldForcePage: React.FC = () => {
     }, 850);
   };
 
+  const getMissingRequiredProfileFields = (): string[] => {
+    const missing: string[] = [];
+    if (!formActionType.trim()) missing.push('Action Type');
+    if (!formJoiningDate.trim()) missing.push('Joining Date');
+    if (!formGender.trim()) missing.push('Gender');
+    if (!formEmployeeCategory.trim()) missing.push('Employee Category');
+    if (!formEmploymentType.trim()) missing.push('Employment Type');
+    if (!formPresentAddress.trim()) missing.push('Present Address');
+    return missing;
+  };
+
   const handleSaveAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canCreateEmployee) return;
     if (!formName.trim() || !formCode.trim()) return;
+    const missingProfileFields = getMissingRequiredProfileFields();
+    if (missingProfileFields.length > 0) {
+      setFormValidationError(`Please fill in required fields: ${missingProfileFields.join(', ')}.`);
+      if (addModalTab !== 'all' && addModalTab !== 'basic') {
+        setAddModalTab('basic');
+      }
+      return;
+    }
+    setFormValidationError('');
     if (selectedDepartments.length === 0) {
       setDepartmentError('Please select at least one Assigned Business Department.');
       if (addModalTab !== 'all' && addModalTab !== 'basic') {
@@ -780,6 +803,15 @@ export const FieldForcePage: React.FC = () => {
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEditEmployee || !editingRep) return;
+    const missingProfileFields = getMissingRequiredProfileFields();
+    if (missingProfileFields.length > 0) {
+      setFormValidationError(`Please fill in required fields: ${missingProfileFields.join(', ')}.`);
+      if (editModalTab !== 'all' && editModalTab !== 'basic') {
+        setEditModalTab('basic');
+      }
+      return;
+    }
+    setFormValidationError('');
     if (selectedDepartments.length === 0) {
       setDepartmentError('Please select at least one Assigned Business Department.');
       if (editModalTab !== 'all' && editModalTab !== 'basic') {
@@ -2023,6 +2055,12 @@ export const FieldForcePage: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveAdd} className="p-6 overflow-y-auto space-y-6 text-xs flex-1">
+              {formValidationError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-center gap-2 text-xs font-medium">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                  <span>{formValidationError}</span>
+                </div>
+              )}
               {/* SECTION 1: CORE OFFICER IDENTIFICATION, HR, PERSONAL & BANKING INFORMATION */}
               {(addModalTab === 'all' || addModalTab === 'basic') && (
                 <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-4">
@@ -2186,11 +2224,15 @@ export const FieldForcePage: React.FC = () => {
                     {/* Action Type */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Action Type
+                        Action Type<span className="text-red-500">*</span>
                       </label>
                       <select
+                        required
                         value={formActionType}
-                        onChange={(e) => setFormActionType(e.target.value)}
+                        onChange={(e) => {
+                          setFormActionType(e.target.value);
+                          if (formValidationError) setFormValidationError('');
+                        }}
                         className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       >
                         <option value="">-- Select Action Type --</option>
@@ -2208,12 +2250,16 @@ export const FieldForcePage: React.FC = () => {
                     {/* Joining Date */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Joining Date
+                        Joining Date<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
+                        required
                         value={formJoiningDate}
-                        onChange={(e) => setFormJoiningDate(e.target.value)}
+                        onChange={(e) => {
+                          setFormJoiningDate(e.target.value);
+                          if (formValidationError) setFormValidationError('');
+                        }}
                         className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       />
                     </div>
@@ -2250,11 +2296,15 @@ export const FieldForcePage: React.FC = () => {
                     {/* Gender */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Gender
+                        Gender<span className="text-red-500">*</span>
                       </label>
                       <select
+                        required
                         value={formGender}
-                        onChange={(e) => setFormGender(e.target.value)}
+                        onChange={(e) => {
+                          setFormGender(e.target.value);
+                          if (formValidationError) setFormValidationError('');
+                        }}
                         className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
                       >
                         <option value="">Select Gender</option>
@@ -2274,11 +2324,15 @@ export const FieldForcePage: React.FC = () => {
                       {/* Employee Category */}
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                          Employee Category
+                          Employee Category<span className="text-red-500">*</span>
                         </label>
                         <select
+                          required
                           value={formEmployeeCategory}
-                          onChange={(e) => setFormEmployeeCategory(e.target.value)}
+                          onChange={(e) => {
+                            setFormEmployeeCategory(e.target.value);
+                            if (formValidationError) setFormValidationError('');
+                          }}
                           className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         >
                           <option value="">-- Select Employee Category --</option>
@@ -2295,11 +2349,15 @@ export const FieldForcePage: React.FC = () => {
                       {/* Employment Type */}
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                          Employment Type
+                          Employment Type<span className="text-red-500">*</span>
                         </label>
                         <select
+                          required
                           value={formEmploymentType}
-                          onChange={(e) => setFormEmploymentType(e.target.value)}
+                          onChange={(e) => {
+                            setFormEmploymentType(e.target.value);
+                            if (formValidationError) setFormValidationError('');
+                          }}
                           className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         >
                           <option value="">-- Select Employment Type --</option>
@@ -2331,12 +2389,16 @@ export const FieldForcePage: React.FC = () => {
                       {/* Present Address */}
                       <div className="sm:col-span-2">
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                          Present Address
+                          Present Address<span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
+                          required
                           value={formPresentAddress}
-                          onChange={(e) => setFormPresentAddress(e.target.value)}
+                          onChange={(e) => {
+                            setFormPresentAddress(e.target.value);
+                            if (formValidationError) setFormValidationError('');
+                          }}
                           placeholder="House, Road, Area, City"
                           className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         />
@@ -3249,6 +3311,12 @@ export const FieldForcePage: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveEdit} className="p-6 overflow-y-auto space-y-6 text-xs flex-1">
+              {formValidationError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-center gap-2 text-xs font-medium">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                  <span>{formValidationError}</span>
+                </div>
+              )}
               {/* SECTION 1: CORE OFFICER IDENTIFICATION, HR, PERSONAL & BANKING INFORMATION */}
               {(editModalTab === 'all' || editModalTab === 'basic') && (
                 <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-4">
@@ -3396,11 +3464,15 @@ export const FieldForcePage: React.FC = () => {
                     {/* Action Type */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Action Type
+                        Action Type<span className="text-red-500">*</span>
                       </label>
                       <select
+                        required
                         value={formActionType}
-                        onChange={(e) => setFormActionType(e.target.value)}
+                        onChange={(e) => {
+                          setFormActionType(e.target.value);
+                          if (formValidationError) setFormValidationError('');
+                        }}
                         className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       >
                         <option value="">-- Select Action Type --</option>
@@ -3418,12 +3490,16 @@ export const FieldForcePage: React.FC = () => {
                     {/* Joining Date */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Joining Date
+                        Joining Date<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
+                        required
                         value={formJoiningDate}
-                        onChange={(e) => setFormJoiningDate(e.target.value)}
+                        onChange={(e) => {
+                          setFormJoiningDate(e.target.value);
+                          if (formValidationError) setFormValidationError('');
+                        }}
                         className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       />
                     </div>
@@ -3460,11 +3536,15 @@ export const FieldForcePage: React.FC = () => {
                     {/* Gender */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Gender
+                        Gender<span className="text-red-500">*</span>
                       </label>
                       <select
+                        required
                         value={formGender}
-                        onChange={(e) => setFormGender(e.target.value)}
+                        onChange={(e) => {
+                          setFormGender(e.target.value);
+                          if (formValidationError) setFormValidationError('');
+                        }}
                         className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
                       >
                         <option value="">Select Gender</option>
@@ -3484,11 +3564,15 @@ export const FieldForcePage: React.FC = () => {
                       {/* Employee Category */}
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                          Employee Category
+                          Employee Category<span className="text-red-500">*</span>
                         </label>
                         <select
+                          required
                           value={formEmployeeCategory}
-                          onChange={(e) => setFormEmployeeCategory(e.target.value)}
+                          onChange={(e) => {
+                            setFormEmployeeCategory(e.target.value);
+                            if (formValidationError) setFormValidationError('');
+                          }}
                           className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         >
                           <option value="">-- Select Employee Category --</option>
@@ -3505,11 +3589,15 @@ export const FieldForcePage: React.FC = () => {
                       {/* Employment Type */}
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                          Employment Type
+                          Employment Type<span className="text-red-500">*</span>
                         </label>
                         <select
+                          required
                           value={formEmploymentType}
-                          onChange={(e) => setFormEmploymentType(e.target.value)}
+                          onChange={(e) => {
+                            setFormEmploymentType(e.target.value);
+                            if (formValidationError) setFormValidationError('');
+                          }}
                           className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         >
                           <option value="">-- Select Employment Type --</option>
@@ -3541,12 +3629,16 @@ export const FieldForcePage: React.FC = () => {
                       {/* Present Address */}
                       <div className="sm:col-span-2">
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                          Present Address
+                          Present Address<span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
+                          required
                           value={formPresentAddress}
-                          onChange={(e) => setFormPresentAddress(e.target.value)}
+                          onChange={(e) => {
+                            setFormPresentAddress(e.target.value);
+                            if (formValidationError) setFormValidationError('');
+                          }}
                           placeholder="House, Road, Area, City"
                           className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         />
