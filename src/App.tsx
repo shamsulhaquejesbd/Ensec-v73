@@ -55,6 +55,7 @@ import { LoginPage } from './components/auth/LoginPage.tsx';
 import { ProductionCostSheetModal } from './components/manufacturing/ProductionCostSheetModal.tsx';
 import { canViewManufacturingCostSheet } from './types/pagePermissions.ts';
 import {
+  getAccessibleModulesForUser,
   getDefaultLandingModule,
   getFirstAccessibleModule,
   isBasicDataModule,
@@ -282,6 +283,20 @@ function MainApp() {
     }
   }, [hasValidActiveSession, safeLandingModule, activeModule]);
 
+  // If someone navigates directly to '/basic-data', redirect to their first permitted Basic Data child page
+  // rather than exposing Finished Products without basic-data-products permission.
+  useEffect(() => {
+    if (!hasValidActiveSession || activeModule !== 'basic-data') return;
+    const firstPermittedBasicData = getAccessibleModulesForUser(currentUser).find((m) =>
+      m.startsWith('basic-data-')
+    );
+    const targetModule = firstPermittedBasicData || safeLandingModule;
+    setActiveModule(targetModule);
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({ module: targetModule }, '', moduleToPathname(targetModule));
+    }
+  }, [hasValidActiveSession, activeModule, currentUser, safeLandingModule]);
+
   // If session was invalidated/blocked while open, ensure clean logout state
   useEffect(() => {
     if (isAuthenticated && !hasValidActiveSession) {
@@ -431,7 +446,7 @@ function MainApp() {
               {activeModule === 'dashboard' && (
                 <ExecutiveDashboard onNavigate={(mod) => navigateTo(mod)} />
               )}
-              {(activeModule === 'basic-data' || activeModule === 'basic-data-products') && (
+              {activeModule === 'basic-data-products' && (
                 <FinishedProductsPage />
               )}
               {activeModule === 'basic-data-categories' && (

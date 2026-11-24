@@ -204,10 +204,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const toggleDropdown = (id: string) => {
+  const toggleDropdown = (id: string, currentlyOpen?: boolean) => {
     setDropdownsOpen((prev) => ({
       ...prev,
-      [id]: !prev[id],
+      [id]: currentlyOpen !== undefined ? !currentlyOpen : !prev[id],
     }));
   };
 
@@ -566,8 +566,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div key={item.id} className="space-y-0.5">
                           <button
                             onClick={() => {
-                              toggleDropdown(item.id);
-                              onSelectModule(item.id);
+                              toggleDropdown(item.id, isDropdownOpen);
+                              if (item.id !== 'basic-data' && item.id !== 'installment-reports') {
+                                onSelectModule(item.id);
+                              }
                             }}
                             className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all group ${
                               isActive || isChildActive
