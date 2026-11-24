@@ -1105,6 +1105,30 @@ export const OvertimeReportsTab: React.FC = () => {
 
   // Generate Report 5: Payroll Sync
   const generatePayrollReport = () => {
+    const purposeOptions = payrollSettings?.overtimePurposes || [];
+    const resolvePostedOvertimePurpose = (r: (typeof filteredRequests)[number]): string => {
+      const directPurpose = String(r.projectPurpose || '').trim();
+      const matchedById = r.purposeId
+        ? purposeOptions.find((p) => p.id === r.purposeId)?.name?.trim() || ''
+        : '';
+      const isPostedByApproval =
+        r.status === 'Final Approved' ||
+        Boolean(r.finalApprovedAt) ||
+        Boolean(r.purposeSelectedBy) ||
+        Boolean(r.purposeId);
+
+      if (isPostedByApproval) {
+        return directPurpose || matchedById || '-';
+      }
+      if (
+        directPurpose &&
+        purposeOptions.some((p) => p.name.trim().toLowerCase() === directPurpose.toLowerCase())
+      ) {
+        return directPurpose;
+      }
+      return '-';
+    };
+
     return filteredRequests.map(r => {
       const baseRow: Record<string, any> = {
         'Request #': r.requestNumber,
@@ -1113,7 +1137,7 @@ export const OvertimeReportsTab: React.FC = () => {
         'Employee Name': r.employeeName,
         'Department': r.department,
         'Hours': r.actualOvertimeHours || r.expectedHours,
-        'Reason for Overtime Requisition': r.overtimeReason || '-',
+        'Overtime Purpose': resolvePostedOvertimePurpose(r),
       };
       if (canViewCost) {
         baseRow['Rate (BDT)'] = r.hourlyRateBDT || 0;
